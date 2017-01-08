@@ -31,7 +31,7 @@ local function test(mode)
         a = 'aaa',
         b = false,
     }
-    local kcp1 = LKcp.lkcp_create(session, function (buf)
+    local kcp1 = LKcp.lkcp_create(session,  1, function (buf)
         udp_output(buf, info)
     end)
     local info2 = {
@@ -42,7 +42,7 @@ local function test(mode)
             print 'hahahah!!!'
         end,
     }
-    local kcp2 = LKcp.lkcp_create(session, function (buf)
+    local kcp2 = LKcp.lkcp_create(session, 2, function (buf)
         udp_output(buf, info2)
     end)
 
@@ -108,69 +108,68 @@ local function test(mode)
             slap = slap + 20
             index = index + 1
         end
+	--处理虚拟网络：检测是否有udp包从p1->p2
+	while 1 do
+                hrlen, hr = lsm:recv(1)
+                if hrlen < 0 then
+                    break
+                end
+	   --如果 p2收到udp，则作为下层协议输入到kcp2
+                kcp2:lkcp_input(hr)
+             end
 
-		--处理虚拟网络：检测是否有udp包从p1->p2
-		while 1 do
-			hrlen, hr = lsm:recv(1)
-			if hrlen < 0 then
-                break
-            end
-			--如果 p2收到udp，则作为下层协议输入到kcp2
-			kcp2:lkcp_input(hr)
-        end
-
-		--处理虚拟网络：检测是否有udp包从p2->p1
-		while 1 do
-			hrlen, hr = lsm:recv(0)
-			if hrlen < 0 then
-                break
-            end
-			--如果 p1收到udp，则作为下层协议输入到kcp1
-			kcp1:lkcp_input(hr)
-        end
-
-        --kcp2接收到任何包都返回回去
-        while 1 do
-            hrlen, hr = kcp2:lkcp_recv()
-            if hrlen <= 0 then
-                break
-            end
-            kcp2:lkcp_send(hr)
-            --kcp2:lkcp_flush()
-        end
-
-		--kcp1收到kcp2的回射数据
-		while 1 do
-		    hrlen, hr = kcp1:lkcp_recv()
-			--没有收到包就退出
-			if hrlen <= 0 then
-                break
+            --处理虚拟网络：检测是否有udp包从p2->p1
+            while 1 do
+    	hrlen, hr = lsm:recv(0)
+    	if hrlen < 0 then
+                    break
+                  end
+    	--如果 p1收到udp，则作为下层协议输入到kcp1
+    	kcp1:lkcp_input(hr)
             end
 
-            local hr1 = string.sub(hr, 1, 4)
-            local hr2 = string.sub(hr, 5, 8)
-            local sn = LUtil.netbytes2uint32(hr1)
-            local ts = LUtil.netbytes2uint32(hr2)
-            local rtt = current - ts
+            --kcp2接收到任何包都返回回去
+            while 1 do
+                hrlen, hr = kcp2:lkcp_recv()
+                if hrlen <= 0 then
+                    break
+                end
+                kcp2:lkcp_send(hr)
+                --kcp2:lkcp_flush()
+            end
+
+             --kcp1收到kcp2的回射数据
+	while 1 do
+	  hrlen, hr = kcp1:lkcp_recv()
+	  --没有收到包就退出
+	  if hrlen <= 0 then
+                 break
+                end
+
+                local hr1 = string.sub(hr, 1, 4)
+                local hr2 = string.sub(hr, 5, 8)
+                local sn = LUtil.netbytes2uint32(hr1)
+                local ts = LUtil.netbytes2uint32(hr2)
+                local rtt = current - ts
 			
-			if sn ~= inext then
-				--如果收到的包不连续
-				print(string.format("ERROR sn %d<->%d\n", count, inext))
-				return
-            end
+	  if sn ~= inext then
+	    --如果收到的包不连续
+	    print(string.format("ERROR sn %d<->%d\n", count, inext))
+	    return
+                end
 
-			inext = inext + 1
-			sumrtt = sumrtt + rtt
-			count = count + 1
-			if rtt > maxrtt then
-                maxrtt = rtt
-            end
+	 inext = inext + 1
+	 sumrtt = sumrtt + rtt
+	 count = count + 1
+	 if rtt > maxrtt then
+                 maxrtt = rtt
+               end
 
-			print(string.format("[RECV] mode=%d sn=%d rtt=%d\n", mode, sn, rtt))
-        end
-		if inext > 10 then
-            break
-        end
+	 print(string.format("[RECV] mode=%d sn=%d rtt=%d\n", mode, sn, rtt))
+             end
+             if inext > 10 then
+               break
+             end
     end
 
     ts1 = getms() - ts1
